@@ -1,0 +1,293 @@
+import os
+import requests
+from datetime import datetime, timedelta
+import json
+import time
+
+# Alpaca API Configuration
+API_KEY = os.environ.get('ALPACA_API_KEY')
+SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY')
+BASE_URL = 'https://paper-api.alpaca.markets'
+
+HEADERS = {
+    'APCA-API-KEY-ID': API_KEY,
+    'APCA-API-SECRET-KEY': SECRET_KEY
+}
+
+# Configuration
+SYMBOL = 'UPRO'
+QUANTITY = 5
+LEVERAGE_MULTIPLIER = 3  # UPRO is 3x leveraged
+
+def load_sp500_stop():
+    """Load SP500 stop price from config file"""
+    try:
+        with open('sp500_stop_config.json', 'r') as f:
+            config = json.load(f)
+            return config.get('sp500_stop_price')
+    except FileNotFoundError:
+        print("⚠️  sp500_stop_config.json not found. Using default stop.")
+        return None
+
+def get_market_clock():
+    """Get market clock info"""
+    url = f'{BASE_URL}/v2/clock'
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+def get_previous_close(symbol):
+    """Get previous day's close price"""
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=7)
+    
+    url = f'https://data.alpaca.markets/v2/stocks/{symbol}/bars'
+    params = {
+        'start': start_date.strftime('%Y-%m-%d'),
+        'end': end_date.strftime('%Y-%m-%d'),
+        'timeframe': '1Day',
+        'limit': 5
+    }
+    
+    response = requests.get(url, headers=HEADERS, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        bars = data.get('bars', [])
+        if len(bars) >= 2:
+            return bars[-2]['c']  # Previous day's close
+    return None
+
+def get_sp500_data():
+    """Get SP500 (SPY) open and previous close for stop calculation"""
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=7)
+    
+    url = f'https://data.alpaca.markets/v2/stocks/SPY/bars'
+    params = {
+        'start': start_date.strftime('%Y-%m-%d'),
+        'end': end_date.strftime('%Y-%m-%d'),
+        'timeframe': '1Day',
+        'limit': 5
+    }
+    
+    response = requests.get(url, headers=HEADERS, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        bars = data.get('bars', [])
+        if len(bars) >= 2:
+            prev_close = bars[-2]['c']
+            today_open = bars[-1]['o'] if len(bars) > 0 else None
+            return prev_close, today_open
+    return None, None
+
+def get_current_price(symbol):
+    """Get current price from latest trade"""
+    url = f'https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest'
+    response = requests.get(url, headers=HEADERS)
+    
+    if response.status_code == 200:
+        data = response.json()
+        return data['trade']['p']
+    return None
+
+def get_current_position(symbol):
+    """Check if we have an open position"""
+    url = f'{BASE_URL}/v2/positions/{symbol}'
+    response = requests.get(url, headers=HEADERS)
+    
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+def place_market_order(symbol, qty, side):
+    """Place a market order"""
+    url = f'{BASE_URL}/v2/orders'
+    order_data = {
+        'symbol': symbol,
+        'qty': qty,
+        'side': side,
+        'type': 'market',
+        'time_in_force': 'day'
+    }
+    
+    response = requests.post(url, headers=HEADERS, json=order_data)
+    if response.status_code == 200:
+        order = response.json()
+        print(f"✅ {side.upper()} order placed: {qty} shares of {symbol}")
+        print(f"   Order ID: {order['id']}")
+        return order
+    else:
+        print(f"❌ Failed to place {side} order: {response.text}")
+        return None
+
+def calculate_dynamic_stop(sp500_stop_price, sp500_open, upro_entry_price):
+    """Calculate UPRO stop price based on SP500 stop"""
+    if not sp500_stop_price or not sp500_open:
+        return None
+    
+    # Calculate SP500 stop percentage
+    sp500_stop_pct = ((sp500_stop_price - sp500_open) / sp500_open) * 100
+    
+    # Apply 3x leverage to UPRO
+    upro_stop_pct = sp500_stop_pct 
+    
+    # Calculate UPRO stop price
+    upro_stop_price = upro_entry_price * (1 + upro_stop_pct / 100)
+    
+    print(f"\n📊 Dynamic Stop Calculation:")
+    print(f"   SP500 Open: ${sp500_open:.2f}")
+    print(f"   SP500 Stop: ${sp500_stop_price:.2f} ({sp500_stop_pct:.2f}%)")
+    print(f"   UPRO Entry: ${upro_entry_price:.2f}")
+    print(f"   UPRO Stop %: {upro_stop_pct:.2f}% (3x leverage)")
+    print(f"   UPRO Stop Price: ${upro_stop_price:.2f}")
+    
+    return upro_stop_price
+
+def check_entry_conditions(symbol, prev_close):
+    """Check if entry conditions are met"""
+    # Get today's open price for gap calculation
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=1)
+    
+    url = f'https://data.alpaca.markets/v2/stocks/{symbol}/bars'
+    params = {
+        'start': start_date.strftime('%Y-%m-%d'),
+        'timeframe': '1Day',
+        'limit': 1
+    }
+    
+    response = requests.get(url, headers=HEADERS, params=params)
+    if response.status_code != 200:
+        return False, None
+    
+    data = response.json()
+    bars = data.get('bars', [])
+    if not bars:
+        return False, None
+    
+    today_open = bars[0]['o']
+    gap_pct = ((today_open - prev_close) / prev_close) * 100
+    
+    print(f"\n📊 Gap Analysis:")
+    print(f"   Previous Close: ${prev_close:.2f}")
+    print(f"   Today's Open: ${today_open:.2f}")
+    print(f"   Gap: {gap_pct:.2f}%")
+    
+    current_price = get_current_price(symbol)
+    if not current_price:
+        return False, None
+    
+    print(f"   Current Price: ${current_price:.2f}")
+    
+    # Entry logic
+    if gap_pct > 1.0:
+        print(f"   ⏳ Gap > 1%, waiting 15 minutes after open...")
+        clock = get_market_clock()
+        if clock and clock['is_open']:
+            market_open_time = datetime.fromisoformat(clock['next_open'].replace('Z', '+00:00'))
+            time_since_open = (datetime.now(market_open_time.tzinfo) - market_open_time).total_seconds() / 60
+            
+            if time_since_open < 15:
+                print(f"   ⏰ Only {time_since_open:.1f} minutes since open, waiting...")
+                return False, None
+            else:
+                print(f"   ✅ 15 minutes passed, checking price...")
+    
+    # Check if price is above previous close
+    if current_price >= prev_close:
+        print(f"   ✅ ENTRY CONDITION MET: Price ${current_price:.2f} >= Prev Close ${prev_close:.2f}")
+        return True, current_price
+    else:
+        print(f"   ❌ Price ${current_price:.2f} < Prev Close ${prev_close:.2f}, waiting...")
+        return False, None
+
+def main():
+    """Main UPRO trading logic"""
+    print(f"\n{'#'*60}")
+    print(f"# UPRO AUTOMATED TRADING SYSTEM")
+    print(f"# Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}")
+    print(f"{'#'*60}")
+    
+    if not API_KEY or not SECRET_KEY:
+        print("❌ ERROR: Alpaca API credentials not found!")
+        return
+    
+    # Check market status
+    clock = get_market_clock()
+    if not clock:
+        print("❌ Cannot get market clock")
+        return
+    
+    if not clock['is_open']:
+        print("⏸️  Market is closed")
+        return
+    
+    # Load SP500 stop price
+    sp500_stop_price = load_sp500_stop()
+    if sp500_stop_price:
+        print(f"✅ SP500 Stop Price loaded: ${sp500_stop_price:.2f}")
+    else:
+        print("⚠️  No SP500 stop price configured")
+    
+    # Get previous close
+    prev_close = get_previous_close(SYMBOL)
+    if not prev_close:
+        print(f"❌ Cannot get previous close for {SYMBOL}")
+        return
+    
+    # Get SP500 data for stop calculation
+    sp500_prev_close, sp500_open = get_sp500_data()
+    
+    # Check if we have a position
+    position = get_current_position(SYMBOL)
+    
+    if position:
+        # We have a position - monitor for exit
+        qty = float(position['qty'])
+        entry_price = float(position['avg_entry_price'])
+        current_price = float(position['current_price'])
+        unrealized_pl = float(position['unrealized_pl'])
+        
+        print(f"\n💼 Current Position:")
+        print(f"   Quantity: {qty}")
+        print(f"   Entry Price: ${entry_price:.2f}")
+        print(f"   Current Price: ${current_price:.2f}")
+        print(f"   Unrealized P/L: ${unrealized_pl:.2f}")
+        
+        # Calculate dynamic stop
+        if sp500_stop_price and sp500_open:
+            upro_stop_price = calculate_dynamic_stop(sp500_stop_price, sp500_open, entry_price)
+            
+            if upro_stop_price and current_price <= upro_stop_price:
+                print(f"\n🚨 STOP LOSS TRIGGERED!")
+                print(f"   Current: ${current_price:.2f} <= Stop: ${upro_stop_price:.2f}")
+                place_market_order(SYMBOL, qty, 'sell')
+                return
+        
+        # Check if it's near market close (15:58 ET = 20:58 UTC)
+        now = datetime.now()
+        if now.hour == 20 and now.minute >= 58:
+            print(f"\n⏰ Near market close (15:58 ET), closing position...")
+            place_market_order(SYMBOL, qty, 'sell')
+        else:
+            print(f"\n✅ Position OK, monitoring continues...")
+    
+    else:
+        # No position - check entry conditions
+        print(f"\n💤 No open position, checking entry conditions...")
+        
+        should_enter, entry_price = check_entry_conditions(SYMBOL, prev_close)
+        
+        if should_enter:
+            print(f"\n🚀 ENTERING POSITION!")
+            place_market_order(SYMBOL, QUANTITY, 'buy')
+        else:
+            print(f"\n⏳ Entry conditions not met, waiting...")
+    
+    print(f"\n{'#'*60}")
+    print(f"# UPRO monitoring cycle completed")
+    print(f"{'#'*60}\n")
+
+if __name__ == "__main__":
+    main()

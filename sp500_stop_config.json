@@ -1,0 +1,5 @@
+{
+  "sp500_stop_price": 580.00,
+  "last_updated": "2024-12-02",
+  "notes": "Bu dosyayı her gün manuel olarak güncelleyin. SP500 (SPY) için stop fiyatını buraya girin."
+}
