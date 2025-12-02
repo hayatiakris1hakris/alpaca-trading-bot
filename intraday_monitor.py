@@ -16,7 +16,7 @@ HEADERS = {
 # Configuration
 SYMBOL = 'SPXS'
 QUANTITY = 5
-LEVERAGE_MULTIPLIER = 3  # SPXS is 3x inverse leveraged
+LEVERAGE_MULTIPLIER = 3  # SPXS is 3x leveraged
 
 def load_trading_config():
     """Load trading configuration from config file"""
@@ -119,46 +119,65 @@ def place_market_order(symbol, qty, side):
         print(f"❌ Failed to place {side} order: {response.text}")
         return None
 
-def calculate_dynamic_stop(sp500_index_stop, spy_open, spxs_entry_price):
-    """Calculate SPXS stop price based on SP500 Index stop
-    
-    SPXS is INVERSE 3x leveraged, so:
-    - If SP500 goes UP, SPXS goes DOWN
-    - Stop is when SP500 goes ABOVE the stop level
+def calculate_dynamic_stop(sp500_index_stop, spy_open, entry_price, trailing_percent):
+    """Calculate stop price based on SP500 Index stop
     
     Args:
         sp500_index_stop: SP500 Index stop price (e.g., 5900)
         spy_open: SPY ETF open price (e.g., 590)
-        spxs_entry_price: SPXS entry price
+        entry_price: Entry price
+        trailing_percent: Trailing stop percentage
     
     Returns:
-        SPXS stop price
+        Stop price
     """
-    if not sp500_index_stop or not spy_open:
-        return None
     
-    # Convert SP500 Index stop to SPY equivalent (Index / 10)
-    spy_stop_price = sp500_index_stop / 10
+    # Try to calculate stop from SP500 price
+    if sp500_index_stop and spy_open:
+        try:
+            # Convert SP500 Index stop to SPY equivalent (Index / 10)
+            spy_stop_price = sp500_index_stop / 10
+            
+            # Calculate SPY stop percentage
+            spy_stop_pct = ((spy_stop_price - spy_open) / spy_open) * 100
+            
+            # Calculate stop price
+            stop_price = entry_price * (1 + spy_stop_pct / 100)
+            
+            print(f"\n📊 Dynamic Stop Calculation:")
+            print(f"   SP500 Index Stop: {sp500_index_stop:.2f}")
+            print(f"   SPY Stop (Index/10): ${spy_stop_price:.2f}")
+            print(f"   SPY Open: ${spy_open:.2f}")
+            print(f"   Stop %: {spy_stop_pct:.2f}%")
+            print(f"   Entry: ${entry_price:.2f}")
+            print(f"   Stop Price: ${stop_price:.2f}")
+            
+            return stop_price
+            
+        except Exception as e:
+            print(f"⚠️  Error calculating dynamic stop: {e}")
+            print(f"   Falling back to trailing stop: {trailing_percent}%")
     
-    # Calculate SPY stop percentage (how much UP from open)
-    spy_stop_pct = ((spy_stop_price - spy_open) / spy_open) * 100
+    # Fallback: Use trailing stop
+    stop_price = entry_price * (1 - trailing_percent / 100)
     
-    # SPXS is INVERSE 3x, so when SPY goes up, SPXS goes down with same %
-    spxs_stop_pct = spy_stop_pct
+    print(f"\n📊 Trailing Stop:")
+    print(f"   Entry: ${entry_price:.2f}")
+    print(f"   Trailing %: -{trailing_percent:.2f}%")
+    print(f"   Stop Price: ${stop_price:.2f}")
     
-    # Calculate SPXS stop price (entry + percentage, because when SPY goes up, SPXS also goes up to trigger stop)
-    spxs_stop_price = spxs_entry_price * (1 + abs(spxs_stop_pct) / 100)
+    return stop_price
+
+def update_trailing_stop(entry_price, current_price, current_stop, trailing_percent):
+    """Update trailing stop if price moved up"""
+    new_stop = current_price * (1 - trailing_percent / 100)
     
-    print(f"\n📊 Dynamic Stop Calculation (INVERSE):")
-    print(f"   SP500 Index Stop: {sp500_index_stop:.2f}")
-    print(f"   SPY Stop (Index/10): ${spy_stop_price:.2f}")
-    print(f"   SPY Open: ${spy_open:.2f}")
-    print(f"   SPY Stop %: +{spy_stop_pct:.2f}% (UP)")
-    print(f"   SPXS Entry: ${spxs_entry_price:.2f}")
-    print(f"   SPXS Stop Price: ${spxs_stop_price:.2f} (triggers when price goes ABOVE this)")
-    print(f"   Note: When SP500 goes UP, SPXS goes DOWN, but we exit when SPXS goes ABOVE stop")
+    # Trailing stop only moves up, never down
+    if new_stop > current_stop:
+        print(f"   📈 Trailing stop updated: ${current_stop:.2f} → ${new_stop:.2f}")
+        return new_stop
     
-    return spxs_stop_price
+    return current_stop
 
 def check_entry_conditions(symbol, prev_close):
     """Check if entry conditions are met"""
@@ -196,8 +215,8 @@ def check_entry_conditions(symbol, prev_close):
     
     print(f"   Current Price: ${current_price:.2f}")
     
-    # Entry logic (same as UPRO but for SPXS)
-    if abs(gap_pct) > 1.0:  # Check absolute gap
+    # Entry logic
+    if gap_pct > 1.0:
         print(f"   ⏳ Gap > 1%, waiting 15 minutes after open...")
         clock = get_market_clock()
         if clock and clock['is_open']:
@@ -210,18 +229,23 @@ def check_entry_conditions(symbol, prev_close):
             else:
                 print(f"   ✅ 15 minutes passed, checking price...")
     
-    # Check if price is BELOW previous close (INVERSE entry signal - opposite of UPRO)
-    if current_price <= prev_close:
-        print(f"   ✅ ENTRY CONDITION MET: Price ${current_price:.2f} <= Prev Close ${prev_close:.2f}")
+    # Check if price is above previous close
+    if current_price >= prev_close:
+        print(f"   ✅ ENTRY CONDITION MET: Price ${current_price:.2f} >= Prev Close ${prev_close:.2f}")
         return True, current_price
     else:
-        print(f"   ❌ Price ${current_price:.2f} > Prev Close ${prev_close:.2f}, waiting...")
+        print(f"   ❌ Price ${current_price:.2f} < Prev Close ${prev_close:.2f}, waiting...")
         return False, None
+
+# Global variable to track highest price for trailing stop
+highest_price = {}
 
 def main():
     """Main SPXS trading logic"""
+    global highest_price
+    
     print(f"\n{'#'*60}")
-    print(f"# SPXS AUTOMATED TRADING SYSTEM (INVERSE 3X)")
+    print(f"# SPXS AUTOMATED TRADING SYSTEM")
     print(f"# Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}")
     print(f"{'#'*60}")
     
@@ -247,10 +271,16 @@ def main():
     
     trading_enabled = config.get('spxs_trading_enabled', False)
     sp500_stop_price = config.get('sp500_stop_price')
+    trailing_percent = config.get('trailing_stop_percent', 3.0)
+    
+    # Validate trailing percent
+    if trailing_percent is None or trailing_percent <= 0 or trailing_percent > 3:
+        trailing_percent = 3.0
     
     print(f"\n⚙️  Trading Configuration:")
     print(f"   Trading Enabled: {'✅ YES' if trading_enabled else '❌ NO (Position management only)'}")
-    print(f"   SP500 Stop Price: {sp500_stop_price:.2f}" if sp500_stop_price else "   SP500 Stop: Not set")
+    print(f"   SP500 Stop Price: ${sp500_stop_price:.2f}" if sp500_stop_price else "   SP500 Stop: Not set")
+    print(f"   Trailing Stop %: {trailing_percent:.2f}%")
     print(f"   Last Updated: {config.get('last_updated', 'Unknown')}")
     
     # Get previous close
@@ -278,22 +308,46 @@ def main():
         print(f"   Current Price: ${current_price:.2f}")
         print(f"   Unrealized P/L: ${unrealized_pl:.2f}")
         
+        # Initialize highest price tracker
+        if SYMBOL not in highest_price:
+            highest_price[SYMBOL] = current_price
+        
+        # Update highest price
+        if current_price > highest_price[SYMBOL]:
+            highest_price[SYMBOL] = current_price
+            print(f"   🔝 New high: ${highest_price[SYMBOL]:.2f}")
+        
         # Calculate dynamic stop
-        if sp500_stop_price and spy_open:
-            spxs_stop_price = calculate_dynamic_stop(sp500_stop_price, spy_open, entry_price)
-            
-            # SPXS is inverse: stop triggers when price goes ABOVE stop (not below)
-            if spxs_stop_price and current_price >= spxs_stop_price:
-                print(f"\n🚨 STOP LOSS TRIGGERED!")
-                print(f"   Current: ${current_price:.2f} >= Stop: ${spxs_stop_price:.2f}")
-                place_market_order(SYMBOL, qty, 'sell')
-                return
+        initial_stop = calculate_dynamic_stop(sp500_stop_price, spy_open, entry_price, trailing_percent)
+        
+        # Update trailing stop based on highest price
+        trailing_stop = highest_price[SYMBOL] * (1 - trailing_percent / 100)
+        
+        # Use the higher of initial stop or trailing stop
+        final_stop = max(initial_stop, trailing_stop)
+        
+        print(f"\n📊 Stop Management:")
+        print(f"   Initial Stop: ${initial_stop:.2f}")
+        print(f"   Trailing Stop (from ${highest_price[SYMBOL]:.2f}): ${trailing_stop:.2f}")
+        print(f"   Final Stop: ${final_stop:.2f}")
+        
+        if current_price <= final_stop:
+            print(f"\n🚨 STOP LOSS TRIGGERED!")
+            print(f"   Current: ${current_price:.2f} <= Stop: ${final_stop:.2f}")
+            place_market_order(SYMBOL, qty, 'sell')
+            # Reset highest price tracker
+            if SYMBOL in highest_price:
+                del highest_price[SYMBOL]
+            return
         
         # Check if it's near market close (15:58 ET = 20:58 UTC)
         now = datetime.now()
         if now.hour == 20 and now.minute >= 58:
             print(f"\n⏰ Near market close (15:58 ET), closing position...")
             place_market_order(SYMBOL, qty, 'sell')
+            # Reset highest price tracker
+            if SYMBOL in highest_price:
+                del highest_price[SYMBOL]
         else:
             print(f"\n✅ Position OK, monitoring continues...")
     
