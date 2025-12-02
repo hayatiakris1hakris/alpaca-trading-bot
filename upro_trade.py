@@ -22,7 +22,7 @@ LEVERAGE_MULTIPLIER = 3  # UPRO is 3x leveraged
 def load_trading_config():
     """Load trading configuration from config file"""
     try:
-        with open('sp500_stop_config.json', 'r') as f:
+        with open('upro_emir.json', 'r') as f::
             config = json.load(f)
             return config
     except FileNotFoundError:
