@@ -22,7 +22,7 @@ LEVERAGE_MULTIPLIER = 3  # UPRO is 3x leveraged
 def load_trading_config():
     """Load trading configuration from config file"""
     try:
-        with open('upro_emir.json', 'r') as f:
+        with open('sp500_stop_config.json', 'r') as f:
             config = json.load(f)
             return config
     except FileNotFoundError:
@@ -39,23 +39,25 @@ def get_market_clock():
 
 def get_previous_close(symbol):
     """Get previous day's close price"""
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=7)
+    # Get data up to yesterday to avoid partial today's bar
+    end_date = datetime.now() - timedelta(days=1)
+    start_date = end_date - timedelta(days=10)
     
     url = f'https://data.alpaca.markets/v2/stocks/{symbol}/bars'
     params = {
         'start': start_date.strftime('%Y-%m-%d'),
         'end': end_date.strftime('%Y-%m-%d'),
         'timeframe': '1Day',
-        'limit': 5
+        'limit': 10
     }
     
     response = requests.get(url, headers=HEADERS, params=params)
     if response.status_code == 200:
         data = response.json()
         bars = data.get('bars', [])
-        if len(bars) >= 2:
-            return bars[-2]['c']  # Previous day's close
+        if len(bars) >= 1:
+            # Last complete bar is previous day's close
+            return bars[-1]['c']
     return None
 
 def get_sp500_data():
