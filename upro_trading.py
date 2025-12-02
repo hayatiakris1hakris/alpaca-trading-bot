@@ -59,7 +59,7 @@ def get_previous_close(symbol):
     return None
 
 def get_sp500_data():
-    """Get SP500 (SPY) open and previous close for stop calculation"""
+    """Get SPY open for stop calculation (SPY = SP500 Index / 10)"""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
     
@@ -75,11 +75,10 @@ def get_sp500_data():
     if response.status_code == 200:
         data = response.json()
         bars = data.get('bars', [])
-        if len(bars) >= 2:
-            prev_close = bars[-2]['c']
-            today_open = bars[-1]['o'] if len(bars) > 0 else None
-            return prev_close, today_open
-    return None, None
+        if len(bars) >= 1:
+            today_open = bars[-1]['o']
+            return today_open
+    return None
 
 def get_current_price(symbol):
     """Get current price from latest trade"""
