@@ -19,14 +19,14 @@ SYMBOL = 'UPRO'
 QUANTITY = 5
 LEVERAGE_MULTIPLIER = 3  # UPRO is 3x leveraged
 
-def load_sp500_stop():
-    """Load SP500 stop price from config file"""
+def load_trading_config():
+    """Load trading configuration from config file"""
     try:
         with open('sp500_stop_config.json', 'r') as f:
             config = json.load(f)
-            return config.get('sp500_stop_price')
+            return config
     except FileNotFoundError:
-        print("⚠️  sp500_stop_config.json not found. Using default stop.")
+        print("⚠️  sp500_stop_config.json not found.")
         return None
 
 def get_market_clock():
@@ -129,8 +129,8 @@ def calculate_dynamic_stop(sp500_stop_price, sp500_open, upro_entry_price):
     # Calculate SP500 stop percentage
     sp500_stop_pct = ((sp500_stop_price - sp500_open) / sp500_open) * 100
     
-    # Apply 3x leverage to UPRO
-    upro_stop_pct = sp500_stop_pct 
+    # UPRO is already 3x leveraged, so use the same percentage
+    upro_stop_pct = sp500_stop_pct
     
     # Calculate UPRO stop price
     upro_stop_price = upro_entry_price * (1 + upro_stop_pct / 100)
@@ -139,7 +139,7 @@ def calculate_dynamic_stop(sp500_stop_price, sp500_open, upro_entry_price):
     print(f"   SP500 Open: ${sp500_open:.2f}")
     print(f"   SP500 Stop: ${sp500_stop_price:.2f} ({sp500_stop_pct:.2f}%)")
     print(f"   UPRO Entry: ${upro_entry_price:.2f}")
-    print(f"   UPRO Stop %: {upro_stop_pct:.2f}% (3x leverage)")
+    print(f"   UPRO Stop %: {upro_stop_pct:.2f}%")
     print(f"   UPRO Stop Price: ${upro_stop_price:.2f}")
     
     return upro_stop_price
@@ -223,12 +223,19 @@ def main():
         print("⏸️  Market is closed")
         return
     
-    # Load SP500 stop price
-    sp500_stop_price = load_sp500_stop()
-    if sp500_stop_price:
-        print(f"✅ SP500 Stop Price loaded: ${sp500_stop_price:.2f}")
-    else:
-        print("⚠️  No SP500 stop price configured")
+    # Load trading configuration
+    config = load_trading_config()
+    if not config:
+        print("❌ Cannot load trading config")
+        return
+    
+    trading_enabled = config.get('upro_trading_enabled', False)
+    sp500_stop_price = config.get('sp500_stop_price')
+    
+    print(f"\n⚙️  Trading Configuration:")
+    print(f"   Trading Enabled: {'✅ YES' if trading_enabled else '❌ NO (Position management only)'}")
+    print(f"   SP500 Stop Price: ${sp500_stop_price:.2f}" if sp500_stop_price else "   SP500 Stop: Not set")
+    print(f"   Last Updated: {config.get('last_updated', 'Unknown')}")
     
     # Get previous close
     prev_close = get_previous_close(SYMBOL)
@@ -274,8 +281,16 @@ def main():
             print(f"\n✅ Position OK, monitoring continues...")
     
     else:
-        # No position - check entry conditions
-        print(f"\n💤 No open position, checking entry conditions...")
+        # No position - check if trading is enabled today
+        print(f"\n💤 No open position")
+        
+        if not trading_enabled:
+            print(f"\n🚫 Trading disabled for today (upro_trading_enabled = false)")
+            print(f"   Only position management is active.")
+            print(f"   To enable trading, set 'upro_trading_enabled: true' in sp500_stop_config.json")
+            return
+        
+        print(f"\n✅ Trading enabled for today, checking entry conditions...")
         
         should_enter, entry_price = check_entry_conditions(SYMBOL, prev_close)
         
