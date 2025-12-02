@@ -1,7 +1,7 @@
 {
-  "spxs_trading_enabled": false,
+  "upro_trading_enabled": false,
   "sp500_stop_price": 5900.00,
   "trailing_stop_percent": 3.0,
   "last_updated": "2024-12-02",
-  "notes": "spxs_trading_enabled: true = bugün alım yap, false = sadece pozisyon yönet | sp500_stop_price: SP500 INDEX değeri (örn: 5900) | trailing_stop_percent: Trailing stop % (boş veya >3 ise %3 kullanılır)"
+  "notes": "upro_trading_enabled: true = bugün alım yap, false = sadece pozisyon yönet"
 }
