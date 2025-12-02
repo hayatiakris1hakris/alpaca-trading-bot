@@ -1,5 +1,5 @@
 {
-  "spxs_trading_enabled": false,
+  "spxs_trading_enabled": true,
   "sp500_stop_price": 5900.00,
   "trailing_stop_percent": 3.0,
   "last_updated": "2024-12-02",
