@@ -2,11 +2,8 @@ name: Alpaca UPRO/SPXS Trading System
 
 on:
   schedule:
-    # UPRO: Run every 5 minutes during market hours (9:30 AM - 4:00 PM ET = 14:30 - 21:00 UTC)
+    # UPRO & SPXS: Run every 5 minutes during market hours (9:30 AM - 4:00 PM ET = 14:30 - 21:00 UTC)
     - cron: '*/5 14-20 * * 1-5'
-    
-    # SPXS: Run every hour from 9:45 AM to 3:45 PM ET (14:45 to 20:45 UTC) on weekdays
-    - cron: '45 14,15,16,17,18,19,20 * * 1-5'
   
   # Allow manual triggering for testing
   workflow_dispatch:
@@ -25,7 +22,7 @@ jobs:
   upro-monitor:
     runs-on: ubuntu-latest
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '*/5 14-20 * * 1-5') ||
+      (github.event_name == 'schedule') ||
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.monitor_type == 'both' || github.event.inputs.monitor_type == 'upro'))
     
     steps:
@@ -53,7 +50,7 @@ jobs:
   spxs-monitor:
     runs-on: ubuntu-latest
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '45 14,15,16,17,18,19,20 * * 1-5') ||
+      (github.event_name == 'schedule') ||
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.monitor_type == 'both' || github.event.inputs.monitor_type == 'spxs'))
     
     steps:
@@ -75,5 +72,5 @@ jobs:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
         run: |
-          echo "Running SPXS Intraday Monitor..."
+          echo "Running SPXS Trading System..."
           python intraday_monitor.py
