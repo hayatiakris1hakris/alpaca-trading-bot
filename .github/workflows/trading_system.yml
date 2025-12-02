@@ -45,7 +45,7 @@ jobs:
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
         run: |
           echo "Running UPRO Trading System..."
-          python upro_trading.py
+          python upro_trade.py
   
   spxs-monitor:
     runs-on: ubuntu-latest
@@ -73,4 +73,4 @@ jobs:
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
         run: |
           echo "Running SPXS Trading System..."
-          python intraday_monitor.py
+          python spxs_trade.py

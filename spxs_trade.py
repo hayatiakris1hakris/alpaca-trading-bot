@@ -21,7 +21,7 @@ LEVERAGE_MULTIPLIER = 3  # SPXS is 3x leveraged
 def load_trading_config():
     """Load trading configuration from config file"""
     try:
-        with open('spxs_config.json', 'r') as f:
+        with open('spxs_emir.json', 'r') as f:
             config = json.load(f)
             return config
     except FileNotFoundError:
